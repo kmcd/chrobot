@@ -1,0 +1,23 @@
+#!/usr/bin/ruby
+require 'socket'
+
+FULL_PATH = File.expand_path(__FILE__)
+APP_NAME = FULL_PATH[/\A\/data\/([^\/]+)\//, 1]
+HOSTNAME = ARGV[0] || Socket.gethostname
+
+puts "installing chrobot monit script for '#{APP_NAME}' for hostname '#{HOSTNAME}'"
+
+monit_script = %Q(
+check process chrobot_#{APP_NAME}
+  with pidfile /var/run/chrobot.pid
+  start program = "/usr/bin/ruby /data/#{APP_NAME}/current/vendor/plugins/chrobot/scripts/chrobot_daemon start #{HOSTNAME}"
+  stop program = "/usr/bin/ruby /data/#{APP_NAME}/current/vendor/plugins/chrobot/scripts/chrobot_daemon stop #{HOSTNAME}"
+  if totalmem is greater than 100 MB for 5 cycles then restart      # eating up memory?
+  group #{APP_NAME}
+)
+  
+File.open("/etc/monit.d/chrobot.#{APP_NAME}.monitrc", 'w') do |f|
+  f.write(monit_script)
+end
+
+puts `monit reload`

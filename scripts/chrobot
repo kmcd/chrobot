@@ -1,0 +1,16 @@
+#!/usr/bin/ruby
+
+allow_slow = !!ARGV.delete('--allow-slow')
+
+unless ARGV[0] && ARGV[1]
+  puts "usage: chrobot [--allow-slow] <unique-worker-name> <environment>"
+  puts
+  puts "--allow-slow           allow this chrobot to process 'slow' actions"
+  exit(1)
+end
+
+$INSIDE_CHROBOT = true
+ENV['RAILS_ENV'] = ARGV[1]
+require "#{File.dirname(__FILE__)}/../../../../config/environment.rb"
+
+Chrobot::Worker.new(ARGV[0], allow_slow).run_forever

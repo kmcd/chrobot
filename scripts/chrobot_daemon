@@ -1,0 +1,84 @@
+#!/usr/bin/ruby
+
+require 'socket'
+require 'yaml'
+
+FULL_PATH = File.expand_path(__FILE__)
+
+CHROBOT_SCRIPT = File.join(File.dirname(FULL_PATH), 'chrobot')
+RAILS_ROOT = File.dirname(FULL_PATH)[/\A(.+)\/vendor\/plugins/, 1]
+CONFIG_PATH = File.join(RAILS_ROOT, 'config', 'chrobot.yml')
+HOSTNAME = ARGV[1] || Socket.gethostname
+
+unless File.exists?(CONFIG_PATH)
+  puts "couldn't find '#{CONFIG_PATH}'; required for daemon"
+  exit(1)
+end
+
+###################################################################################################
+# LOAD CONFIG
+
+def check_config(config, *keys)
+  keys.all? do |key|
+    puts "'#{key}' not found in '#{CONFIG_PATH}' for '#{HOSTNAME}'" unless config.key?(key)
+    config.key?(key)
+  end
+end
+
+def load_daemon_config(*keys)
+  full_config = YAML.load_file(CONFIG_PATH)
+  host_config = full_config[HOSTNAME]
+  daemon_name = ARGV[2]
+  
+  unless host_config
+    puts "no configuration found in '#{CONFIG_PATH}' for '#{HOSTNAME}'"
+    exit(1)
+  end
+  
+  if daemon_name.nil?
+    if host_config.length > 1
+      puts "multiple configurations found in '#{CONFIG_PATH} for '#{HOSTNAME}'\ndaemon-name must be supplied as second argument"
+    else
+      daemon_name = host_config.keys.first
+    end
+  end
+  
+  daemon_config = host_config[daemon_name]
+  daemon_config['name'] ||= daemon_name
+  daemon_config['cmd'] ||= '/sbin/start-stop-daemon'
+  
+  exit(1) unless check_config(daemon_config, *keys)
+  
+  daemon_config
+end
+
+config = load_daemon_config('name', 'cmd', 'pid_file', 'environment', 'user', 'group', 'allow_slow')
+
+###################################################################################################
+# PROCESS ARGS
+
+def process_command(config, command)
+  config['allow_slow'] = config['allow_slow'].is_a?(TrueClass) || %w(true yes on t y 1).include?(config['allow_slow'].to_s.strip)   # ugly, but just in case
+  
+  case command
+  when 'start'
+    puts `chmod +x #{RAILS_ROOT}/vendor/plugins/chrobot/scripts/chrobot`
+    puts `#{config['cmd']} -S -p #{config['pid_file']} -m -d #{RAILS_ROOT} -c #{config['user']}:#{config['group']} -a vendor/plugins/chrobot/scripts/chrobot -b -- #{'--allow-slow' if config['allow_slow']} #{config['name']} #{config['environment']}`
+  when 'stop'
+    puts `#{config['cmd']} -K -p #{config['pid_file']}`
+  when 'restart'
+    process_command(config, 'stop')
+    process_command(config, 'start')
+  when 'config'
+    config.each do |k, v|
+      puts "#{k}: #{v}"
+    end
+  else
+    puts "usage: chrobot_daemon {start|stop|restart|config} [<host-name>] [<daemon-name>]"
+    puts "host-name is required if you're on a server where the host name changes often"
+    puts "daemon-name is required if multiple chrobot daemons are configured for this host (this isn't the standard config)"
+  end
+end
+
+process_command(config, ARGV[0])
+exit($? || 1)
